@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.DS_Store
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+*.bak
+.vscode/
+.idea/
+.env
+*.env

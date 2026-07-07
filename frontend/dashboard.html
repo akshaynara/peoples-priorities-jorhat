@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jorhat Priorities — MP Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root {
+    --primary: #1a5f3f;
+    --bg: #f7f9f8;
+    --card: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e2e8e5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    margin: 0;
+    color: var(--text);
+  }
+  header {
+    background: var(--primary); color: #fff; padding: 18px 24px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  header h1 { font-size: 1.25rem; margin: 0; }
+  header .stat { font-size: 0.85rem; opacity: 0.9; }
+  .layout {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+    height: calc(100vh - 62px);
+  }
+  #map { height: 100%; width: 100%; }
+  .list-panel { overflow-y: auto; padding: 16px; }
+  .priority-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 12px; cursor: pointer; transition: box-shadow 0.15s;
+  }
+  .priority-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .priority-card .rank {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%; background: var(--primary);
+    color: #fff; font-weight: 700; font-size: 0.85rem; margin-right: 10px;
+  }
+  .priority-card .title { font-weight: 600; font-size: 1rem; }
+  .priority-card .meta { color: var(--muted); font-size: 0.82rem; margin-top: 6px; }
+  .score-bar-bg { background: #eef1f0; border-radius: 6px; height: 6px; margin-top: 8px; overflow: hidden; }
+  .score-bar-fill { background: var(--primary); height: 100%; }
+  .breakdown { display: flex; gap: 12px; margin-top: 8px; font-size: 0.75rem; color: var(--muted); }
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .refresh-btn {
+    background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
+    color: #fff; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏛️ Jorhat Constituency — Development Priorities</h1>
+  <div style="display:flex; align-items:center; gap:14px;">
+    <span class="stat" id="statLine">Loading…</span>
+    <button class="refresh-btn" onclick="loadRankings()">↻ Refresh</button>
+  </div>
+</header>
+
+<div class="layout">
+  <div id="map"></div>
+  <div class="list-panel" id="listPanel">
+    <div class="empty-state">Loading ranked priorities…</div>
+  </div>
+</div>
+
+<script>
+// Live Cloud Run backend. To test against local dev instead, change this
+// to "http://localhost:8080" temporarily.
+const API_BASE = window.API_BASE || "https://peoples-priorities-backend-393184150839.asia-south1.run.app";
+const JORHAT_CENTER = [26.7509, 94.2037];
+
+const map = L.map('map').setView(JORHAT_CENTER, 11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+  maxZoom: 18
+}).addTo(map);
+
+let markers = [];
+
+const CATEGORY_ICONS = {
+  school_upgrade: '🏫',
+  vocational_centre: '🛠️',
+  road_infrastructure: '🛣️',
+  health_facility: '🏥',
+  water_sanitation: '💧',
+  other: '📍'
+};
+
+function clearMarkers() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+}
+
+function renderMarker(item, rank) {
+  const icon = L.divIcon({
+    html: `<div style="background:#1a5f3f;color:#fff;width:30px;height:30px;border-radius:50%;
+           display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;
+           box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff;">${rank}</div>`,
+    className: '', iconSize: [30, 30], iconAnchor: [15, 15]
+  });
+  const marker = L.marker([item.latitude, item.longitude], { icon }).addTo(map);
+  marker.bindPopup(`
+    <strong>${CATEGORY_ICONS[item.category] || '📍'} ${item.category.replace('_',' ')}</strong><br/>
+    ${item.location_name}<br/>
+    Score: ${item.total_score} | ${item.submission_count} submissions
+  `);
+  markers.push(marker);
+  return marker;
+}
+
+function renderList(data) {
+  const panel = document.getElementById('listPanel');
+  if (!data.length) {
+    panel.innerHTML = '<div class="empty-state">No submissions yet. Submit a few requests via the citizen intake page first.</div>';
+    return;
+  }
+  panel.innerHTML = data.map((item, i) => {
+    const pct = Math.round(item.total_score * 100);
+    return `
+      <div class="priority-card" onclick="focusMarker(${i})">
+        <div class="title"><span class="rank">${i+1}</span>${CATEGORY_ICONS[item.category] || '📍'} ${item.category.replace('_',' ')} — ${item.location_name}</div>
+        <div class="meta">${item.submission_count} submission(s) · Score: ${item.total_score}</div>
+        <div class="score-bar-bg"><div class="score-bar-fill" style="width:${pct}%"></div></div>
+        <div class="breakdown">
+          <span>Urgency: ${item.score_breakdown.urgency}</span>
+          <span>Enrollment gap: ${item.score_breakdown.enrollment_gap}</span>
+          <span>Distance gap: ${item.score_breakdown.distance_gap}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+let currentData = [];
+function focusMarker(i) {
+  const item = currentData[i];
+  map.setView([item.latitude, item.longitude], 14);
+  markers[i].openPopup();
+}
+
+async function loadRankings() {
+  try {
+    const res = await fetch(`${API_BASE}/rankings`);
+    const data = await res.json();
+    currentData = data;
+    clearMarkers();
+    data.forEach((item, i) => renderMarker(item, i + 1));
+    renderList(data);
+    document.getElementById('statLine').textContent =
+      `${data.length} priority cluster(s) ranked`;
+  } catch (err) {
+    document.getElementById('statLine').textContent = 'Could not reach server';
+    document.getElementById('listPanel').innerHTML =
+      `<div class="empty-state">⚠️ Can't reach backend at ${API_BASE}.<br/>Start it with: python main.py</div>`;
+  }
+}
+
+loadRankings();
+// Auto-refresh every 15s so new submissions show up live during the demo
+setInterval(loadRankings, 15000);
+</script>
+</body>
+</html>
