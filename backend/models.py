@@ -64,6 +64,8 @@ class CitizenSubmission:
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     has_photo: bool = False            # True if this submission included a photo
+    photo_base64: Optional[str] = None # raw base64 payload, for dashboard thumbnail display
+    photo_mime_type: Optional[str] = None
 
     submitted_at: datetime = field(default_factory=datetime.utcnow)
     ward: str = "Jorhat"
@@ -107,3 +109,6 @@ class RankedPriority:
     sample_summaries: list[str] = field(default_factory=list)  # up to 3 citizen
                                                                   # report summaries,
                                                                   # used for memo generation
+    sample_photo_base64: Optional[str] = None  # one representative photo from this
+                                                 # cluster, if any submission included one
+    sample_photo_mime_type: Optional[str] = None

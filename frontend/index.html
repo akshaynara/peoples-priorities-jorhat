@@ -102,7 +102,16 @@
 
     <div class="action-row">
       <button class="mic" id="micBtn" title="Speak instead">🎤</button>
+      <button class="mic" id="photoBtn" title="Attach a photo">📷</button>
       <button class="primary" id="submitBtn">Submit Request</button>
+    </div>
+    <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none;">
+    <div id="photoPreviewWrap" style="display:none; margin-top:10px;">
+      <div style="position:relative; display:inline-block;">
+        <img id="photoPreview" style="max-width:120px; max-height:120px; border-radius:10px; border:1px solid var(--border);">
+        <button id="removePhotoBtn" title="Remove photo" style="position:absolute; top:-8px; right:-8px; width:22px; height:22px; border-radius:50%; background:#ef4444; color:#fff; border:none; cursor:pointer; font-size:0.8rem; line-height:1;">✕</button>
+      </div>
+      <div style="font-size:0.78rem; color:var(--muted); margin-top:4px;">Photo attached — AI will analyze it directly (text is optional)</div>
     </div>
 
     <div class="examples">
@@ -174,14 +183,44 @@ document.getElementById('micBtn').addEventListener('click', () => {
   }
 });
 
+// --- Photo attachment: convert to base64, preview, remove ---
+let attachedPhotoBase64 = null;
+let attachedPhotoMimeType = null;
+
+document.getElementById('photoBtn').addEventListener('click', () => {
+  document.getElementById('photoInput').click();
+});
+
+document.getElementById('photoInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  attachedPhotoMimeType = file.type || 'image/jpeg';
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    attachedPhotoBase64 = reader.result.split(',')[1];
+    document.getElementById('photoPreview').src = reader.result;
+    document.getElementById('photoPreviewWrap').style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+});
+
+document.getElementById('removePhotoBtn').addEventListener('click', () => {
+  attachedPhotoBase64 = null;
+  attachedPhotoMimeType = null;
+  document.getElementById('photoInput').value = '';
+  document.getElementById('photoPreviewWrap').style.display = 'none';
+});
+
 // --- Submit handler ---
 document.getElementById('submitBtn').addEventListener('click', async () => {
   const text = document.getElementById('submissionText').value.trim();
   const resultEl = document.getElementById('result');
 
-  if (!text) {
+  if (!text && !attachedPhotoBase64) {
     resultEl.className = 'result error';
-    resultEl.innerHTML = 'Please enter or speak your request first.';
+    resultEl.innerHTML = 'Please enter/speak your request, or attach a photo.';
     return;
   }
 
@@ -189,13 +228,29 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
   btn.disabled = true;
   btn.textContent = 'Submitting...';
 
-  try {
+  async function attemptSubmit() {
+    const payload = { text, channel: attachedPhotoBase64 ? 'photo' : 'text' };
+    if (attachedPhotoBase64) {
+      payload.photo_base64 = attachedPhotoBase64;
+      payload.photo_mime_type = attachedPhotoMimeType;
+    }
     const res = await fetch(`${API_BASE}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, channel: 'text' })
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
+    return { res, data };
+  }
+
+  try {
+    let { res, data } = await attemptSubmit();
+
+    if (res.status === 503) {
+      btn.textContent = 'Retrying...';
+      await new Promise(r => setTimeout(r, 4000));
+      ({ res, data } = await attemptSubmit());
+    }
 
     if (res.status === 201) {
       resultEl.className = 'result success';
@@ -205,11 +260,19 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
         <div class="field"><strong>Urgency:</strong> <span class="badge ${data.extracted.urgency}">${data.extracted.urgency}</span></div>
         <div class="field"><strong>Location detected:</strong> ${data.extracted.location_name || '(constituency center — could not pinpoint)'}</div>
         <div class="field"><strong>Summary:</strong> ${data.extracted.summary}</div>
+        ${data.extracted.photo_evidence ? `<div class="field"><strong>Photo evidence:</strong> ${data.extracted.photo_evidence}</div>` : ''}
       `;
       document.getElementById('submissionText').value = '';
+      attachedPhotoBase64 = null;
+      attachedPhotoMimeType = null;
+      document.getElementById('photoInput').value = '';
+      document.getElementById('photoPreviewWrap').style.display = 'none';
     } else if (res.status === 202) {
       resultEl.className = 'result warning';
       resultEl.innerHTML = `<h3>⚠️ Submitted, location needs review</h3><div class="field">${data.warning}</div>`;
+    } else if (res.status === 503) {
+      resultEl.className = 'result warning';
+      resultEl.innerHTML = `<h3>⏳ Server is briefly busy</h3><div class="field">Please wait a few seconds and click Submit again.</div>`;
     } else {
       resultEl.className = 'result error';
       resultEl.innerHTML = `Error: ${data.error || 'something went wrong'}`;

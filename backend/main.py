@@ -110,6 +110,8 @@ def submit():
         latitude=lat,
         longitude=lon,
         has_photo=bool(photo_base64),
+        photo_base64=photo_base64 or None,
+        photo_mime_type=photo_mime_type if photo_base64 else None,
         submitted_at=datetime.utcnow(),
     )
 
@@ -150,6 +152,11 @@ def rankings():
                 "distance_gap": r.distance_gap_score,
             },
             "ai_justification": r.ai_justification,
+            # Ready-to-use data URL for an <img> tag — no separate fetch needed
+            "photo_data_url": (
+                f"data:{r.sample_photo_mime_type};base64,{r.sample_photo_base64}"
+                if r.sample_photo_base64 else None
+            ),
         }
         for r in ranked
     ])

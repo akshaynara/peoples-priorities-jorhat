@@ -184,6 +184,12 @@ def score_cluster(
             + W_DISTANCE * dist_score
         )
 
+    # Pick the first submission in this cluster that actually has a photo,
+    # if any — shown as a thumbnail on the dashboard card.
+    photo_submission = next(
+        (s for s in cluster_submissions_list if s.photo_base64), None
+    )
+
     return RankedPriority(
         cluster_id=cluster_id,
         category=cluster_submissions_list[0].category,
@@ -199,6 +205,8 @@ def score_cluster(
         sample_summaries=[
             s.summary for s in cluster_submissions_list[:3] if s.summary
         ],
+        sample_photo_base64=photo_submission.photo_base64 if photo_submission else None,
+        sample_photo_mime_type=photo_submission.photo_mime_type if photo_submission else None,
     )
 
 

@@ -84,9 +84,25 @@
     padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
     background: #fff; cursor: pointer; font-size: 0.85rem;
   }
+  .card-thumb {
+    width: 56px; height: 56px; border-radius: 8px; object-fit: cover;
+    border: 1px solid var(--border); cursor: pointer; float: right;
+    margin-left: 10px;
+  }
+  .lightbox-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+    align-items: center; justify-content: center; z-index: 1100; padding: 20px;
+    cursor: pointer;
+  }
+  .lightbox-overlay.open { display: flex; }
+  .lightbox-overlay img { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
 </style>
 </head>
 <body>
+
+<div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
+  <img id="lightboxImg" src="">
+</div>
 
 <div class="modal-overlay" id="memoModal">
   <div class="modal-box">
@@ -168,8 +184,12 @@ function renderList(data) {
   }
   panel.innerHTML = data.map((item, i) => {
     const pct = Math.round(item.total_score * 100);
+    const thumb = item.photo_data_url
+      ? `<img class="card-thumb" src="${item.photo_data_url}" onclick="event.stopPropagation(); openLightbox('${item.photo_data_url}')" title="Click to view full photo">`
+      : '';
     return `
       <div class="priority-card">
+        ${thumb}
         <div onclick="focusMarker(${i})">
           <div class="title"><span class="rank">${i+1}</span>${CATEGORY_ICONS[item.category] || '📍'} ${item.category.replace('_',' ')} — ${item.location_name}</div>
           <div class="meta">${item.submission_count} submission(s) · Score: ${item.total_score}</div>
@@ -238,6 +258,15 @@ function copyMemo() {
   navigator.clipboard.writeText(currentMemoText).then(() => {
     alert('Memo copied to clipboard.');
   });
+}
+
+function openLightbox(dataUrl) {
+  document.getElementById('lightboxImg').src = dataUrl;
+  document.getElementById('lightbox').classList.add('open');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
 }
 
 async function loadRankings() {
