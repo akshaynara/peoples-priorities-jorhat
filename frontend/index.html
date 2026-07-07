@@ -105,6 +105,7 @@
       <button class="mic" id="photoBtn" title="Attach a photo">📷</button>
       <button class="primary" id="submitBtn">Submit Request</button>
     </div>
+    <div id="micStatus" style="font-size:0.8rem; color:var(--muted); margin-top:6px; min-height:18px;"></div>
     <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none;">
     <div id="photoPreviewWrap" style="display:none; margin-top:10px;">
       <div style="position:relative; display:inline-block;">
@@ -145,25 +146,54 @@ function fillExample(i) {
 // --- Voice input via browser Web Speech API (free, no Google Cloud STT needed) ---
 let recognizing = false;
 let recognition = null;
+const micStatus = document.getElementById('micStatus');
+
+const SPEECH_ERROR_MESSAGES = {
+  'not-allowed': '🚫 Microphone access denied. Check your browser\'s site settings and allow microphone access, then try again.',
+  'no-speech': '🔇 No speech detected. Try again and speak clearly right after clicking the mic.',
+  'audio-capture': '🎤 No microphone found. Check that one is connected and try again.',
+  'network': '📶 Network error during voice recognition. Try again.',
+  'aborted': '', // user manually stopped — not an error, show nothing
+  'language-not-supported': '⚠️ Hindi voice recognition isn\'t supported in this browser. Try typing instead.',
+};
 
 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SpeechRecognition();
   recognition.continuous = false;
-  recognition.interimResults = false;
+  recognition.interimResults = true;  // show text live as the person speaks, not just at the end
   recognition.lang = 'hi-IN'; // Hindi; browser will still transcribe English reasonably
 
-  recognition.onresult = (event) => {
-    const transcript = event.results[0][0].transcript;
-    document.getElementById('submissionText').value = transcript;
+  recognition.onstart = () => {
+    micStatus.textContent = '🎙️ Listening… speak now';
+    micStatus.style.color = 'var(--primary)';
   };
+
+  recognition.onresult = (event) => {
+    // Concatenate all results so far (interim + final) into one live-updating string
+    let transcript = '';
+    for (let i = 0; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    document.getElementById('submissionText').value = transcript;
+    micStatus.textContent = '🎙️ Listening… speak now';
+  };
+
   recognition.onend = () => {
     recognizing = false;
     document.getElementById('micBtn').classList.remove('recording');
+    if (document.getElementById('submissionText').value.trim()) {
+      micStatus.textContent = '✅ Captured — review the text above, then submit';
+      micStatus.style.color = 'var(--muted)';
+    }
   };
-  recognition.onerror = () => {
+
+  recognition.onerror = (event) => {
     recognizing = false;
     document.getElementById('micBtn').classList.remove('recording');
+    const message = SPEECH_ERROR_MESSAGES[event.error] || `⚠️ Voice input error: ${event.error}`;
+    micStatus.textContent = message;
+    micStatus.style.color = message ? '#b45309' : 'var(--muted)';
   };
 } else {
   document.getElementById('micBtn').title = "Voice input not supported in this browser — try Chrome";
@@ -178,6 +208,9 @@ document.getElementById('micBtn').addEventListener('click', () => {
     recognition.stop();
   } else {
     recognizing = true;
+    document.getElementById('submissionText').value = '';
+    micStatus.textContent = '🎙️ Starting…';
+    micStatus.style.color = 'var(--primary)';
     document.getElementById('micBtn').classList.add('recording');
     recognition.start();
   }
