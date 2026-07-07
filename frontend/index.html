@@ -189,28 +189,13 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
   btn.disabled = true;
   btn.textContent = 'Submitting...';
 
-  // Small helper: does one attempt, returns {res, data}
-  async function attemptSubmit() {
+  try {
     const res = await fetch(`${API_BASE}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, channel: 'text' })
     });
     const data = await res.json();
-    return { res, data };
-  }
-
-  try {
-    let { res, data } = await attemptSubmit();
-
-    // Auto-retry once on a transient error (usually Gemini free-tier rate
-    // limit) before showing anything to the user — most blips clear within
-    // a few seconds, so this avoids interrupting submission flow / demo.
-    if (res.status === 503) {
-      btn.textContent = 'Retrying...';
-      await new Promise(r => setTimeout(r, 4000));
-      ({ res, data } = await attemptSubmit());
-    }
 
     if (res.status === 201) {
       resultEl.className = 'result success';
@@ -225,9 +210,6 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
     } else if (res.status === 202) {
       resultEl.className = 'result warning';
       resultEl.innerHTML = `<h3>⚠️ Submitted, location needs review</h3><div class="field">${data.warning}</div>`;
-    } else if (res.status === 503) {
-      resultEl.className = 'result warning';
-      resultEl.innerHTML = `<h3>⏳ Server is briefly busy</h3><div class="field">Please wait a few seconds and click Submit again.</div>`;
     } else {
       resultEl.className = 'result error';
       resultEl.innerHTML = `Error: ${data.error || 'something went wrong'}`;

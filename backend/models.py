@@ -63,6 +63,7 @@ class CitizenSubmission:
     location_name: str = ""            # e.g. "Titabor, Jorhat"
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    has_photo: bool = False            # True if this submission included a photo
 
     submitted_at: datetime = field(default_factory=datetime.utcnow)
     ward: str = "Jorhat"
@@ -103,3 +104,6 @@ class RankedPriority:
 
     ai_justification: str = ""         # Gemini-generated plain-language rationale
     linked_submission_ids: list[str] = field(default_factory=list)
+    sample_summaries: list[str] = field(default_factory=list)  # up to 3 citizen
+                                                                  # report summaries,
+                                                                  # used for memo generation

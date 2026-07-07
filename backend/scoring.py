@@ -196,6 +196,9 @@ def score_cluster(
         distance_gap_score=round(dist_score, 3),
         total_score=round(total, 3),
         linked_submission_ids=[s.submission_id for s in cluster_submissions_list],
+        sample_summaries=[
+            s.summary for s in cluster_submissions_list[:3] if s.summary
+        ],
     )
 
 

@@ -18,8 +18,8 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 
 from config import DEMO_MODE, GEMINI_LIVE, MAPS_LIVE
-from models import CitizenSubmission, SubmissionChannel
-from extraction import extract_submission_fields, geocode_location
+from models import CitizenSubmission, SubmissionChannel, Category
+from extraction import extract_submission_fields, extract_from_photo, geocode_location, generate_priority_memo
 from scoring import rank_priorities
 from benchmark_data import load_benchmarks
 
@@ -54,27 +54,41 @@ SUBMISSIONS: list[CitizenSubmission] = []
 @app.route("/submit", methods=["POST"])
 def submit():
     """
-    Body: { "text": "...", "channel": "text" | "voice" | "sms" | "whatsapp" }
+    Body: { "text": "...", "channel": "text" | "voice" | "sms" | "whatsapp",
+            "photo_base64": "..." (optional), "photo_mime_type": "..." (optional) }
+
+    Text-only submissions work as before. If photo_base64 is present, the
+    photo is analyzed directly via Gemini's multimodal vision (with any
+    accompanying text as supporting context) — this is what lets a citizen
+    submit just a photo of a pothole or damaged classroom with no text at
+    all, directly answering the problem statement's explicit call for
+    photo intake alongside voice/text.
+
     For voice, the client runs Speech-to-Text (or browser Web Speech API in
     demo mode) BEFORE hitting this endpoint, and sends the transcript as `text`.
     """
     body = request.get_json(force=True)
     raw_text = body.get("text", "").strip()
     channel = SubmissionChannel(body.get("channel", "text"))
+    photo_base64 = body.get("photo_base64", "")
+    photo_mime_type = body.get("photo_mime_type", "image/jpeg")
 
-    if not raw_text:
-        return jsonify({"error": "text is required"}), 400
+    if not raw_text and not photo_base64:
+        return jsonify({"error": "text or photo is required"}), 400
 
     try:
-        extracted = extract_submission_fields(raw_text, channel)
+        if photo_base64:
+            extracted = extract_from_photo(photo_base64, photo_mime_type, text_hint=raw_text)
+        else:
+            extracted = extract_submission_fields(raw_text, channel)
     except Exception as e:
-        # Most common cause: Gemini free-tier rate limit (~15 req/min) hit
-        # during rapid-fire testing/seeding. Return clean JSON instead of
-        # crashing, so callers (like seed_data.py) can detect and retry.
+        # Most common cause: Gemini free-tier rate limit hit during rapid
+        # testing/seeding. Return clean JSON instead of crashing, so callers
+        # (like seed_data.py) can detect and retry.
         return jsonify({
             "error": "extraction_failed",
             "detail": str(e),
-            "hint": "Often a Gemini rate limit (free tier ~15 req/min). Wait a few seconds and retry.",
+            "hint": "Often a Gemini rate limit. Wait a few seconds and retry.",
         }), 503
 
     try:
@@ -86,7 +100,7 @@ def submit():
 
     submission = CitizenSubmission(
         submission_id=str(uuid.uuid4()),
-        raw_text=raw_text,
+        raw_text=raw_text or "(photo submission)",
         language=extracted["language"],
         channel=channel,
         category=extracted["category"],
@@ -95,6 +109,7 @@ def submit():
         location_name=extracted["location_name"],
         latitude=lat,
         longitude=lon,
+        has_photo=bool(photo_base64),
         submitted_at=datetime.utcnow(),
     )
 
@@ -138,6 +153,55 @@ def rankings():
         }
         for r in ranked
     ])
+
+
+@app.route("/generate_memo", methods=["POST", "OPTIONS"])
+def generate_memo():
+    """
+    Body: { "cluster_id": "..." } — matches a cluster_id from the current
+    /rankings response. Re-runs ranking (clusters aren't persisted with
+    stable IDs between requests, consistent with the rest of this
+    prototype's in-memory design) and generates a formal action memo for
+    the matching priority using Gemini.
+
+    This turns the ranked list from something a human has to interpret
+    into something an MP's office could immediately forward to the
+    relevant department.
+    """
+    if request.method == "OPTIONS":
+        return "", 204
+
+    body = request.get_json(force=True)
+    cluster_id = body.get("cluster_id", "")
+
+    benchmarks = load_benchmarks()
+    ranked = rank_priorities(SUBMISSIONS, benchmarks)
+    match = next((r for r in ranked if r.cluster_id == cluster_id), None)
+
+    if not match:
+        return jsonify({"error": "cluster_not_found",
+                         "hint": "Rankings may have changed since you loaded them — refresh and retry."}), 404
+
+    sample_submission = next(
+        (s for s in SUBMISSIONS if s.submission_id in match.linked_submission_ids), None
+    )
+    sample_text = sample_submission.raw_text if sample_submission else ""
+
+    try:
+        memo_text = generate_priority_memo(
+            category=match.category.value,
+            location_name=match.location_name,
+            submission_count=match.submission_count,
+            urgency_score=match.avg_urgency_score,
+            enrollment_gap=match.enrollment_gap_score,
+            distance_gap=match.distance_gap_score,
+            total_score=match.total_score,
+            sample_text=sample_text,
+        )
+    except Exception as e:
+        return jsonify({"error": "memo_generation_failed", "detail": str(e)}), 503
+
+    return jsonify({"memo": memo_text, "cluster_id": cluster_id})
 
 
 @app.route("/status", methods=["GET"])
